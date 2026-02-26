@@ -1,0 +1,5 @@
+{
+  "name": "Text Spiral Funnel",
+  "description": "An animated spiral funnel made from scrolling text, with GIF and WebM export capabilities.",
+  "requestFramePermissions": []
+}

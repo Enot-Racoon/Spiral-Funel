@@ -4,10 +4,16 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, Play, Square, Loader2, Settings2 } from 'lucide-react';
+import { Download, Play, Square, Loader2, Settings2, MessageSquare, Send, Sparkles, X } from 'lucide-react';
+import { askGemini } from './services/geminiService';
 
 // Define the GIF.js type since we're using it from a CDN
 declare const GIF: any;
+
+interface Message {
+  role: 'user' | 'ai';
+  text: string;
+}
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,6 +24,13 @@ export default function App() {
   const [textColor, setTextColor] = useState('#ffffff');
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  
+  // AI State
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [userInput, setUserInput] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const requestRef = useRef<number>(null);
   const startTimeRef = useRef<number>(Date.now());
@@ -256,6 +269,38 @@ export default function App() {
     gif.render();
   };
 
+  const handleSendMessage = async () => {
+    if (!userInput.trim() || isAiLoading) return;
+
+    const userMsg: Message = { role: 'user', text: userInput };
+    setChatMessages(prev => [...prev, userMsg]);
+    setUserInput('');
+    setIsAiLoading(true);
+
+    try {
+      const response = await askGemini(userInput);
+      const aiMsg: Message = { role: 'ai', text: response || 'Sorry, I couldn\'t generate a response.' };
+      setChatMessages(prev => [...prev, aiMsg]);
+    } catch (error) {
+      const errorMsg: Message = { role: 'ai', text: 'Error: Could not connect to Gemini. Please check your API key.' };
+      setChatMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const applyAiText = (newText: string) => {
+    // Clean up text for the funnel (remove quotes, extra whitespace)
+    const cleaned = newText.replace(/["']/g, '').trim();
+    setText(cleaned);
+  };
+
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages]);
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black font-sans">
       <canvas
@@ -270,87 +315,159 @@ export default function App() {
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4 pointer-events-none">
         <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl pointer-events-auto flex flex-col gap-6">
           
-          <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Settings2 className="w-5 h-5 text-white/50" />
               <h1 className="text-white font-semibold tracking-tight">Spiral Funnel Controls</h1>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Display Text</label>
-                <input
-                  type="text"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-white/20 transition-all"
-                  placeholder="Enter text..."
-                />
+            <button 
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              className={`p-2 rounded-xl transition-all pointer-events-auto ${isChatOpen ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+            >
+              <MessageSquare className="w-5 h-5" />
+            </button>
+          </div>
+
+          {!isChatOpen ? (
+            <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Display Text</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-white/20 transition-all pr-10"
+                        placeholder="Enter text..."
+                      />
+                      <button 
+                        onClick={() => setIsChatOpen(true)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
+                        title="Get AI suggestions"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Animation Speed</label>
+                    <div className="flex items-center gap-4 h-[42px]">
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="5"
+                        step="0.1"
+                        value={speed}
+                        onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                        className="flex-1 accent-white"
+                      />
+                      <span className="text-white font-mono text-sm w-8">{speed.toFixed(1)}x</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Background</label>
+                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                      <input
+                        type="color"
+                        value={bgColor}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        className="w-8 h-8 rounded-lg border-none bg-transparent cursor-pointer"
+                      />
+                      <span className="text-white/60 text-xs font-mono uppercase">{bgColor}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Text Color</label>
+                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                      <input
+                        type="color"
+                        value={textColor}
+                        onChange={(e) => setTextColor(e.target.value)}
+                        className="w-8 h-8 rounded-lg border-none bg-transparent cursor-pointer"
+                      />
+                      <span className="text-white/60 text-xs font-mono uppercase">{textColor}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={generateGIF}
+                  disabled={isExporting}
+                  className="flex-1 flex items-center justify-center gap-2 bg-white text-black font-bold py-3 rounded-2xl hover:bg-white/90 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
+                >
+                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  GIF
+                </button>
+                <button
+                  onClick={generateWebM}
+                  disabled={isExporting}
+                  className="flex-1 flex items-center justify-center gap-2 bg-white/10 text-white font-bold py-3 rounded-2xl hover:bg-white/20 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 border border-white/10"
+                >
+                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  WebM
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 h-[400px] animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <div className="flex-1 overflow-y-auto pr-2 flex flex-col gap-3 custom-scrollbar">
+                {chatMessages.length === 0 && (
+                  <div className="text-center py-10">
+                    <Sparkles className="w-8 h-8 text-white/20 mx-auto mb-3" />
+                    <p className="text-white/40 text-sm">Ask Gemini for creative text ideas or visual patterns!</p>
+                  </div>
+                )}
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-white text-black rounded-tr-none' : 'bg-white/10 text-white rounded-tl-none border border-white/10'}`}>
+                      {msg.text}
+                    </div>
+                    {msg.role === 'ai' && (
+                      <button 
+                        onClick={() => applyAiText(msg.text)}
+                        className="mt-1 text-[10px] text-white/40 hover:text-white/80 transition-colors uppercase tracking-widest font-bold flex items-center gap-1"
+                      >
+                        <Play className="w-2 h-2" /> Apply to Funnel
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {isAiLoading && (
+                  <div className="flex items-center gap-2 text-white/40 text-xs animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Gemini is thinking...
+                  </div>
+                )}
+                <div ref={chatEndRef} />
               </div>
               
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Animation Speed</label>
-                <div className="flex items-center gap-4 h-[42px]">
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="5"
-                    step="0.1"
-                    value={speed}
-                    onChange={(e) => setSpeed(parseFloat(e.target.value))}
-                    className="flex-1 accent-white"
-                  />
-                  <span className="text-white font-mono text-sm w-8">{speed.toFixed(1)}x</span>
-                </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-white/20 transition-all"
+                  placeholder="Ask Gemini..."
+                />
+                <button
+                  onClick={handleSendMessage}
+                  disabled={isAiLoading || !userInput.trim()}
+                  className="bg-white text-black p-2.5 rounded-xl hover:bg-white/90 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Background</label>
-                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
-                  <input
-                    type="color"
-                    value={bgColor}
-                    onChange={(e) => setBgColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border-none bg-transparent cursor-pointer"
-                  />
-                  <span className="text-white/60 text-xs font-mono uppercase">{bgColor}</span>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Text Color</label>
-                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
-                  <input
-                    type="color"
-                    value={textColor}
-                    onChange={(e) => setTextColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border-none bg-transparent cursor-pointer"
-                  />
-                  <span className="text-white/60 text-xs font-mono uppercase">{textColor}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={generateGIF}
-              disabled={isExporting}
-              className="flex-1 flex items-center justify-center gap-2 bg-white text-black font-bold py-3 rounded-2xl hover:bg-white/90 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
-            >
-              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              GIF
-            </button>
-            <button
-              onClick={generateWebM}
-              disabled={isExporting}
-              className="flex-1 flex items-center justify-center gap-2 bg-white/10 text-white font-bold py-3 rounded-2xl hover:bg-white/20 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 border border-white/10"
-            >
-              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-              WebM
-            </button>
-          </div>
+          )}
         </div>
       </div>
 
